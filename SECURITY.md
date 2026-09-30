@@ -7,7 +7,7 @@ If you find a security issue in paylocal, please do not open a public issue.
 Use GitHub's private reporting form:
 https://github.com/omoyolab/paylocal/security/advisories/new
 
-Or email **axoxweb@gmail.com** with "paylocal security" in the subject.
+Or email **xanderabim@gmail.com** with "paylocal security" in the subject.
 
 You will get an acknowledgement within 72 hours and a fix or a plan within 14 days for
 confirmed issues. Credit is given in the release notes unless you prefer otherwise.
