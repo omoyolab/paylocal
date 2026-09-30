@@ -34,7 +34,19 @@ jobs:
             echo "Tag $GITHUB_REF_NAME does not match package.json version $PKG" >&2
             exit 1
           fi
+      - name: Skip publish if this version is already on npm
+        id: published
+        run: |
+          NAME="$(node -p "require('./package.json').name")"
+          VERSION="$(node -p "require('./package.json').version")"
+          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "$NAME@$VERSION is already published, skipping npm publish"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Publish to npm
+        if: steps.published.outputs.skip == 'false'
         run: npm publish --provenance --access public
       - name: Create GitHub release
         run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
