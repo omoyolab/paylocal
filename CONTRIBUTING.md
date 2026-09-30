@@ -73,6 +73,10 @@ Prettier and ESLint are configured, so formatting is not a review topic. Beyond 
 4. The release workflow runs `pnpm check`, publishes to npm with provenance, and creates
    the GitHub release from the tag.
 
+Publishing uses npm Trusted Publishing, so there is no token to rotate. The package's
+trusted publisher on npmjs.com is this repository's `release.yml` workflow. If that ever
+needs re-linking: package Settings → Trusted publisher → GitHub Actions.
+
 ## Code of conduct
 
 This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md). Be kind.
