@@ -6,10 +6,10 @@ Trigger, replay and verify correctly signed webhook events against your dev serv
 No tunnel, no test card, no waiting for a real transaction.
 
 ```sh
-npx paylocal trigger paystack charge.success --to http://localhost:3000/webhooks/paystack
+npx @omoyolab/paylocal trigger paystack charge.success --to http://localhost:3000/webhooks/paystack
 ```
 
-[![npm](https://img.shields.io/npm/v/paylocal)](https://www.npmjs.com/package/paylocal)
+[![npm](https://img.shields.io/npm/v/%40omoyolab%2Fpaylocal)](https://www.npmjs.com/package/@omoyolab/paylocal)
 [![CI](https://github.com/omoyolab/paylocal/actions/workflows/ci.yml/badge.svg)](https://github.com/omoyolab/paylocal/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
@@ -34,9 +34,9 @@ Zero runtime dependencies. Works with any language on the receiving end.
 ## Install
 
 ```sh
-npm install -g paylocal      # or: pnpm add -g paylocal
+npm install -g @omoyolab/paylocal      # or: pnpm add -g @omoyolab/paylocal
 # or run it without installing
-npx paylocal --help
+npx @omoyolab/paylocal --help
 ```
 
 Requires Node 20 or newer.
@@ -53,7 +53,7 @@ node examples/server.mjs
 In another terminal:
 
 ```sh
-npx paylocal trigger paystack charge.success \
+npx @omoyolab/paylocal trigger paystack charge.success \
   --to http://localhost:3000/webhooks/paystack \
   --secret sk_test_123
 ```
@@ -75,7 +75,7 @@ paylocal ▸ paystack charge.success → http://localhost:3000/webhooks/paystack
 Now check that the handler rejects forgeries:
 
 ```sh
-npx paylocal verify paystack --to http://localhost:3000/webhooks/paystack --secret sk_test_123
+npx @omoyolab/paylocal verify paystack --to http://localhost:3000/webhooks/paystack --secret sk_test_123
 ```
 
 ```
@@ -161,7 +161,7 @@ The same engine is available as a library, so your test suite can produce signed
 without hand-rolling HMACs.
 
 ```ts
-import { webhook } from "paylocal";
+import { webhook } from "@omoyolab/paylocal";
 import request from "supertest";
 import { app } from "../src/app";
 

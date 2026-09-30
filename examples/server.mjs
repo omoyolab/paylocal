@@ -5,9 +5,9 @@
  *   PAYSTACK_SECRET_KEY=sk_test_123 FLUTTERWAVE_SECRET_HASH=my-hash node examples/server.mjs
  *
  * Then, in another terminal:
- *   npx paylocal trigger paystack charge.success --to http://localhost:3000/webhooks/paystack --secret sk_test_123
- *   npx paylocal trigger flutterwave charge.completed --to http://localhost:3000/webhooks/flutterwave --secret my-hash
- *   npx paylocal verify paystack --to http://localhost:3000/webhooks/paystack --secret sk_test_123
+ *   npx @omoyolab/paylocal trigger paystack charge.success --to http://localhost:3000/webhooks/paystack --secret sk_test_123
+ *   npx @omoyolab/paylocal trigger flutterwave charge.completed --to http://localhost:3000/webhooks/flutterwave --secret my-hash
+ *   npx @omoyolab/paylocal verify paystack --to http://localhost:3000/webhooks/paystack --secret sk_test_123
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";

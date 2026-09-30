@@ -2,7 +2,7 @@
  * paylocal — local webhook tooling for Paystack and Flutterwave.
  *
  * @example
- * import { webhook } from "paylocal";
+ * import { webhook } from "@omoyolab/paylocal";
  *
  * const { body, headers } = webhook("paystack", "charge.success", { amount: 500000 })
  *   .sign(process.env.PAYSTACK_SECRET_KEY!);

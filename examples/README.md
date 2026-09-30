@@ -11,8 +11,8 @@ verification functions into your own app.
 node examples/server.mjs
 
 # terminal 2
-npx paylocal trigger paystack charge.success --to http://localhost:3000/webhooks/paystack --secret sk_test_123
-npx paylocal verify paystack --to http://localhost:3000/webhooks/paystack --secret sk_test_123
+npx @omoyolab/paylocal trigger paystack charge.success --to http://localhost:3000/webhooks/paystack --secret sk_test_123
+npx @omoyolab/paylocal verify paystack --to http://localhost:3000/webhooks/paystack --secret sk_test_123
 ```
 
 The defaults are `sk_test_123` for Paystack and `my-hash` for Flutterwave. Override them
