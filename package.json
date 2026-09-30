@@ -1,0 +1,82 @@
+{
+  "name": "paylocal",
+  "version": "0.1.0",
+  "description": "Local webhook tooling for Paystack and Flutterwave. Trigger, replay and verify signed webhook events against your dev server without a tunnel or a real transaction.",
+  "keywords": [
+    "paystack",
+    "flutterwave",
+    "webhook",
+    "webhooks",
+    "payments",
+    "fintech",
+    "nigeria",
+    "africa",
+    "cli",
+    "testing",
+    "local-development"
+  ],
+  "license": "MIT",
+  "author": "Abimbola Omoyola",
+  "homepage": "https://github.com/omoyolab/paylocal#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/omoyolab/paylocal.git"
+  },
+  "bugs": {
+    "url": "https://github.com/omoyolab/paylocal/issues"
+  },
+  "type": "module",
+  "bin": {
+    "paylocal": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@10.30.2",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit",
+    "check": "pnpm lint && pnpm typecheck && pnpm build && pnpm test",
+    "prepublishOnly": "pnpm check"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.6.3",
+    "eslint": "^10.11.0",
+    "prettier": "^3.9.9",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.71.0",
+    "vitest": "^5.0.2"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

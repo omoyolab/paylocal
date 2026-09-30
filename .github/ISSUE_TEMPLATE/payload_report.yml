@@ -1,0 +1,43 @@
+name: Payload report
+description: A real webhook from Paystack or Flutterwave differs from what paylocal sends.
+labels: [payload]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you. Payload reports are the most useful contribution to this project.
+        **Remove every secret, real email, phone number, account number and card detail before pasting.**
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider
+      options: [Paystack, Flutterwave]
+    validations:
+      required: true
+  - type: input
+    id: event
+    attributes:
+      label: Event name
+      placeholder: charge.success
+    validations:
+      required: true
+  - type: textarea
+    id: payload
+    attributes:
+      label: Real payload (redacted)
+      description: The body exactly as the provider delivered it, with sensitive values replaced.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: difference
+    attributes:
+      label: What differs from paylocal's version
+      description: Missing fields, renamed fields, different types, anything your integration tripped over.
+    validations:
+      required: true
+  - type: input
+    id: date
+    attributes:
+      label: When was this delivery received
+      placeholder: 2026-09-15

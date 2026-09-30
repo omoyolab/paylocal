@@ -1,0 +1,32 @@
+name: Bug report
+description: Something does not work the way the README says.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Include the exact command and the output. Replace secrets with `xxx`.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: paylocal version
+      description: Output of `paylocal --version`
+    validations:
+      required: true
+  - type: input
+    id: node
+    attributes:
+      label: Node version and OS
+      placeholder: Node 22.13.0, macOS 15
+    validations:
+      required: true
