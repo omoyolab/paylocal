@@ -12,7 +12,7 @@ import { parseAssignment } from "./util/path.js";
 import { createPainter, shouldUseColor, table, truncate, type Painter } from "./util/term.js";
 import { version } from "./version.js";
 
-const HELP = `paylocal ${version} — local webhook tooling for Paystack and Flutterwave
+const HELP = `paylocal ${version} - local webhook tooling for Paystack and Flutterwave
 
 Usage
   paylocal trigger <provider> <event> --to <url> [options]

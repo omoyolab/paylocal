@@ -1,5 +1,5 @@
 /**
- * paylocal — local webhook tooling for Paystack and Flutterwave.
+ * paylocal: local webhook tooling for Paystack and Flutterwave.
  *
  * @example
  * import { webhook } from "@omoyolab/paylocal";
