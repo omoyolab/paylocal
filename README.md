@@ -24,9 +24,11 @@ means exposing localhost, making a real test payment, and hoping the event arriv
 paylocal removes that loop:
 
 - **Trigger** any supported event with a valid signature, straight to `localhost`.
+- **Run a scenario**: a payment and its refund or dispute, linked by one reference, in
+  order, backwards or twice.
 - **Override** any field, so you can test the edge cases the dashboard never sends.
-- **Replay** a delivery from your log, or a payload you captured from production.
-- **Verify** that your endpoint actually rejects tampered requests.
+- **Replay** the last delivery, one from your log, or a payload you captured from production.
+- **Verify** that your endpoint refuses a missing signature, a wrong secret and a changed body.
 - **Generate fixtures** for Jest, Vitest or any test runner from the same code.
 
 Zero runtime dependencies. Works with any language on the receiving end.
@@ -81,13 +83,18 @@ npx @omoyolab/paylocal verify paystack --to http://localhost:3000/webhooks/payst
 ```
 paylocal ▸ verify paystack → http://localhost:3000/webhooks/paystack
 
-  valid event     accepted HTTP 200, 12ms
-  tampered event  rejected HTTP 401, 3ms
-  tamper          body changed after signing, original signature kept
+  valid event   accepted HTTP 200, 12ms
+  no signature  rejected HTTP 401, 2ms
+  wrong secret  rejected HTTP 401, 2ms
+  changed body  rejected HTTP 401, 3ms
 
 ✔ verified
-  Valid event accepted (HTTP 200), tampered event rejected (HTTP 401).
+  Valid event accepted (HTTP 200), 3 forged requests refused.
 ```
+
+For a whole application built and tested this way, see the
+[shop use case](https://github.com/omoyolab/paylocal-usecases): orders, refunds, disputes
+and both providers, with what it found in paylocal along the way.
 
 ## Commands
 
@@ -113,14 +120,55 @@ paylocal trigger paystack charge.success --to $URL \
 ```
 
 Shortcuts for the fields everyone touches: `--amount`, `--email`, `--reference`, `--currency`.
+Each one sets the field the event keeps that value in. On `charge.success` the reference
+is `data.reference`, on a refund it is `data.transaction_reference`, on a dispute it is
+`data.transaction.reference`. If an event has no such field, the command says so and stops.
+
+`--amount` is in the provider's own unit: kobo for Paystack, naira for Flutterwave.
 
 `--dry-run` prints the signed request without sending it. Add `--json` for machine output.
 
-### `paylocal replay <id|file>`
+### `paylocal scenario <provider> <name>`
 
-Resends a stored payload with a fresh signature.
+Sends the notices a provider sends over the life of one transaction. They share the
+reference, amount, customer and ids that a real run shares.
 
 ```sh
+paylocal scenario paystack refund --to $URL --reference ORD-1042 --amount 1250000
+```
+
+That sends `charge.success`, `refund.pending`, `refund.processing` and `refund.processed`
+for ORD-1042, and prints each one the way `trigger` does.
+
+Providers do not promise the order of delivery, and they send a notice again when they
+are not sure it arrived. Two flags let you check your handler copes:
+
+```sh
+paylocal scenario paystack refund --to $URL --reference ORD-1042 --reverse   # last to first
+paylocal scenario paystack payment --to $URL --reference ORD-1042 --twice    # each notice two times
+```
+
+| Provider    | Scenario         | Notices                                                                     |
+| ----------- | ---------------- | --------------------------------------------------------------------------- |
+| Paystack    | `payment`        | `charge.success`                                                            |
+| Paystack    | `refund`         | `charge.success`, `refund.pending`, `refund.processing`, `refund.processed` |
+| Paystack    | `refund-failed`  | `charge.success`, `refund.pending`, `refund.failed`                         |
+| Paystack    | `dispute`        | `charge.success`, `charge.dispute.create`                                   |
+| Flutterwave | `payment`        | `charge.completed`                                                          |
+| Flutterwave | `failed-payment` | `charge.completed` with a failed status                                     |
+| Flutterwave | `refund`         | `charge.completed`, `refund.completed`                                      |
+
+The shortcuts and `--set` describe the first notice, and the rest follow it. So
+`--set data.id=7001` on a Flutterwave refund scenario gives the charge that id and the
+refund that `tx_id`. `paylocal scenarios` prints this list.
+
+### `paylocal replay <last|id|file>`
+
+Resends a stored payload with a fresh signature. The body is the same, byte for byte,
+which is what a provider's retry looks like to your handler.
+
+```sh
+paylocal replay last --to $URL
 paylocal replay 20260929-211502-118-paystack-charge.success --to $URL
 paylocal replay ./captured-from-prod.json --provider paystack --to $URL
 ```
@@ -130,28 +178,41 @@ Every trigger is recorded in `.paylocal/events/` (add it to `.gitignore`, payloc
 
 ### `paylocal verify <provider>`
 
-Sends one valid event and one tampered event and tells you whether your endpoint can tell
-them apart. Exit code 0 means verified, 1 means it accepted the forgery or rejected the
-real thing. Run it in CI against a staging server if you like.
+Sends one valid event, then each kind of request your endpoint should refuse:
 
-### `paylocal events [provider]` and `paylocal log`
+| Request        | What is wrong with it                                                                          |
+| -------------- | ---------------------------------------------------------------------------------------------- |
+| `no signature` | The signature header is missing                                                                |
+| `wrong secret` | The signature was made with a different secret                                                 |
+| `changed body` | The body was changed after signing. Paystack only, since Flutterwave v3 does not sign the body |
 
-List the events you can trigger, and the deliveries you have sent.
+The endpoint is verified when it accepts the valid event and refuses each of the others
+with a 4xx. If it accepts one, anyone who can reach the URL can fake an event. If it
+answers one with a 5xx, the handler broke where it should have refused; a signature
+comparison that throws on a missing header is the usual cause.
+
+Exit code 0 means verified, 1 means anything else. Run it in CI against a staging server
+if you like.
+
+### `paylocal events [provider]`, `paylocal scenarios [provider]` and `paylocal log`
+
+List the events you can trigger, the scenarios you can run, and the deliveries you have sent.
 
 ### Options
 
-| Option                                             | Meaning                                                                           |
-| -------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `--to <url>`                                       | Endpoint that receives the webhook. Falls back to `PAYLOCAL_URL`.                 |
-| `--secret <value>`                                 | Signing secret. Falls back to `PAYSTACK_SECRET_KEY` or `FLUTTERWAVE_SECRET_HASH`. |
-| `--set <path=value>`                               | Override a payload field. Repeatable.                                             |
-| `--amount`, `--email`, `--reference`, `--currency` | Shortcuts for common fields.                                                      |
-| `--event <name>`                                   | Event used by `verify`. Defaults per provider.                                    |
-| `--provider <id>`                                  | Provider for `replay` when the file does not say.                                 |
-| `--dry-run`                                        | Print the request instead of sending it.                                          |
-| `--no-log`                                         | Skip writing to `.paylocal/events`.                                               |
-| `--timeout <ms>`                                   | Request timeout. Default `10000`.                                                 |
-| `--json`                                           | Machine-readable output.                                                          |
+| Option                                             | Meaning                                                                              |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `--to <url>`                                       | Endpoint that receives the webhook. Falls back to `PAYLOCAL_URL`.                    |
+| `--secret <value>`                                 | Signing secret. Falls back to `PAYSTACK_SECRET_KEY` or `FLUTTERWAVE_SECRET_HASH`.    |
+| `--set <path=value>`                               | Override a payload field. Repeatable.                                                |
+| `--amount`, `--email`, `--reference`, `--currency` | Shortcuts for common fields. The amount is kobo for Paystack, naira for Flutterwave. |
+| `--reverse`, `--twice`                             | For `scenario`: send the notices last to first, or each one two times.               |
+| `--event <name>`                                   | Event used by `verify`. Defaults per provider.                                       |
+| `--provider <id>`                                  | Provider for `replay` when the file does not say.                                    |
+| `--dry-run`                                        | Print the request instead of sending it.                                             |
+| `--no-log`                                         | Skip writing to `.paylocal/events`.                                                  |
+| `--timeout <ms>`                                   | Request timeout. Default `10000`.                                                    |
+| `--json`                                           | Machine-readable output.                                                             |
 
 Exit codes: `0` success, `1` delivery rejected or endpoint not verified, `2` usage error.
 
@@ -178,18 +239,43 @@ test("marks the order paid on charge.success", async () => {
   expect(await orders.get("ORD-1042")).toMatchObject({ status: "paid" });
 });
 
-test("rejects a tampered body", async () => {
-  const { body, headers } = webhook("paystack", "charge.success").sign(secret);
-  await request(app)
-    .post("/webhooks/paystack")
-    .set(headers)
-    .send(body.replace("500000", "1"))
-    .expect(401);
+test("refuses a changed body, and a request with no signature", async () => {
+  const charge = webhook("paystack", "charge.success");
+
+  const forged = charge.tamper(secret);
+  await request(app).post("/webhooks/paystack").set(forged.headers).send(forged.body).expect(401);
+
+  const bare = charge.unsigned();
+  await request(app).post("/webhooks/paystack").set(bare.headers).send(bare.body).expect(401);
 });
 ```
 
-Lower-level pieces are exported too: `buildEvent`, `signEvent`, `deliver`, `verifyEndpoint`,
-`paystackSignature`, `providers`. Everything is typed.
+A fixture has four methods:
+
+| Method              | Gives you                                                         |
+| ------------------- | ----------------------------------------------------------------- |
+| `sign(secret)`      | The body and headers of a real delivery                           |
+| `tamper(secret)`    | A signed request altered so that it must be refused               |
+| `unsigned()`        | The body with no signature header                                 |
+| `send(url, secret)` | Signs and POSTs to a running server, and resolves to the response |
+
+`scenario()` returns the fixtures of a linked run, so a test can send them in any order:
+
+```ts
+import { scenario } from "@omoyolab/paylocal";
+
+test("a refund that arrives before the payment still ends as refunded", async () => {
+  const [charge, , , processed] = scenario("paystack", "refund", { reference: "ORD-1042" });
+
+  await processed.send(url, secret);
+  await charge.send(url, secret);
+
+  expect(await orders.get("ORD-1042")).toMatchObject({ status: "refunded" });
+});
+```
+
+Lower-level pieces are exported too: `buildEvent`, `buildScenario`, `signEvent`, `deliver`,
+`verifyEndpoint`, `paystackSignature`, `providers`. Everything is typed.
 
 ## How the signatures work
 
@@ -200,7 +286,7 @@ Lower-level pieces are exported too: `buildEvent`, `signEvent`, `deliver`, `veri
 
 paylocal signs the exact bytes it sends, so if your handler verifies the raw body (as it
 should) the signature will match. If you parse the JSON first and re-serialize it, the
-signature will not match, and that is a bug in the handler, not in paylocal.
+signature can stop matching, and the handler is what needs fixing.
 
 Flutterwave v3 does not sign the body. `verify` still confirms your endpoint checks the
 header, but treat every payload as a hint and confirm with the verify-transaction API
@@ -213,7 +299,7 @@ Run `paylocal events` for the live list. Currently:
 **Paystack**: `charge.success`, `charge.dispute.create`, `transfer.success`,
 `transfer.failed`, `transfer.reversed`, `subscription.create`, `subscription.disable`,
 `subscription.not_renew`, `invoice.create`, `invoice.update`, `invoice.payment_failed`,
-`refund.pending`, `refund.processed`, `refund.failed`, `customeridentification.success`,
+`refund.pending`, `refund.processing`, `refund.processed`, `refund.failed`, `customeridentification.success`,
 `customeridentification.failed`, `dedicatedaccount.assign.success`,
 `dedicatedaccount.assign.failed`, `paymentrequest.pending`, `paymentrequest.success`.
 

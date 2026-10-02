@@ -1,6 +1,13 @@
 import { createHmac } from "node:crypto";
 
-import type { EventContext, EventDefinition, Provider } from "../types.js";
+import type {
+  EventContext,
+  EventDefinition,
+  Provider,
+  ScenarioDefinition,
+  ShortcutName,
+  ShortcutTarget,
+} from "../types.js";
 import { getPath } from "../util/path.js";
 
 /*
@@ -166,7 +173,7 @@ function invoice(ctx: EventContext, status: "pending" | "success" | "failed") {
   };
 }
 
-function refund(ctx: EventContext, status: "pending" | "processed" | "failed") {
+function refund(ctx: EventContext, status: "pending" | "processing" | "processed" | "failed") {
   return {
     status,
     transaction_reference: ctx.ref(),
@@ -185,10 +192,44 @@ function refund(ctx: EventContext, status: "pending" | "processed" | "failed") {
   };
 }
 
+type Shortcuts = Partial<Record<ShortcutName, ShortcutTarget>>;
+
+/*
+ * Where --amount, --email, --reference and --currency land when an event keeps them
+ * somewhere other than data.amount, data.customer.email, data.reference and
+ * data.currency. `null` means the event has no such field, and asking for it is an error.
+ */
+const onRefund: Shortcuts = { reference: "data.transaction_reference" };
+const onDispute: Shortcuts = {
+  reference: "data.transaction.reference",
+  amount: ["data.transaction.amount", "data.refund_amount"],
+  currency: ["data.currency", "data.transaction.currency"],
+};
+const onInvoice: Shortcuts = {
+  reference: "data.transaction.reference",
+  amount: ["data.amount", "data.transaction.amount"],
+  currency: "data.transaction.currency",
+};
+const onSubscription: Shortcuts = {
+  reference: null,
+  amount: ["data.amount", "data.plan.amount"],
+  currency: "data.plan.currency",
+};
+const onTransfer: Shortcuts = { email: null };
+const onIdentification: Shortcuts = {
+  email: "data.email",
+  amount: null,
+  reference: null,
+  currency: null,
+};
+const onDedicatedAccount: Shortcuts = { amount: null, reference: null, currency: null };
+const onPaymentRequest: Shortcuts = { email: null, reference: null };
+
 const events: Record<string, EventDefinition> = {
   "charge.success": {
     name: "charge.success",
     description: "A customer's payment was successful",
+    shortcuts: { amount: ["data.amount", "data.requested_amount"] },
     template: (ctx) => ({
       event: "charge.success",
       data: {
@@ -228,6 +269,7 @@ const events: Record<string, EventDefinition> = {
   },
   "charge.dispute.create": {
     name: "charge.dispute.create",
+    shortcuts: onDispute,
     description: "A customer opened a chargeback dispute",
     template: (ctx) => ({
       event: "charge.dispute.create",
@@ -264,31 +306,37 @@ const events: Record<string, EventDefinition> = {
   },
   "transfer.success": {
     name: "transfer.success",
+    shortcuts: onTransfer,
     description: "A transfer to a bank account succeeded",
     template: (ctx) => ({ event: "transfer.success", data: transfer(ctx, "success") }),
   },
   "transfer.failed": {
     name: "transfer.failed",
+    shortcuts: onTransfer,
     description: "A transfer to a bank account failed",
     template: (ctx) => ({ event: "transfer.failed", data: transfer(ctx, "failed") }),
   },
   "transfer.reversed": {
     name: "transfer.reversed",
+    shortcuts: onTransfer,
     description: "A transfer was reversed and funds returned to your balance",
     template: (ctx) => ({ event: "transfer.reversed", data: transfer(ctx, "reversed") }),
   },
   "subscription.create": {
     name: "subscription.create",
+    shortcuts: onSubscription,
     description: "A subscription was created for a customer",
     template: (ctx) => ({ event: "subscription.create", data: subscription(ctx, "active") }),
   },
   "subscription.disable": {
     name: "subscription.disable",
+    shortcuts: onSubscription,
     description: "A subscription was disabled",
     template: (ctx) => ({ event: "subscription.disable", data: subscription(ctx, "complete") }),
   },
   "subscription.not_renew": {
     name: "subscription.not_renew",
+    shortcuts: onSubscription,
     description: "A subscription was set to not renew at the end of the period",
     template: (ctx) => ({
       event: "subscription.not_renew",
@@ -297,36 +345,49 @@ const events: Record<string, EventDefinition> = {
   },
   "invoice.create": {
     name: "invoice.create",
+    shortcuts: onInvoice,
     description: "An invoice was created ahead of a subscription charge",
     template: (ctx) => ({ event: "invoice.create", data: invoice(ctx, "pending") }),
   },
   "invoice.update": {
     name: "invoice.update",
+    shortcuts: onInvoice,
     description: "An invoice was updated after a charge attempt",
     template: (ctx) => ({ event: "invoice.update", data: invoice(ctx, "success") }),
   },
   "invoice.payment_failed": {
     name: "invoice.payment_failed",
+    shortcuts: onInvoice,
     description: "A subscription charge failed",
     template: (ctx) => ({ event: "invoice.payment_failed", data: invoice(ctx, "failed") }),
   },
   "refund.pending": {
     name: "refund.pending",
+    shortcuts: onRefund,
     description: "A refund was initiated and is awaiting processing",
     template: (ctx) => ({ event: "refund.pending", data: refund(ctx, "pending") }),
   },
+  "refund.processing": {
+    name: "refund.processing",
+    shortcuts: onRefund,
+    description: "A refund was received by the processor",
+    template: (ctx) => ({ event: "refund.processing", data: refund(ctx, "processing") }),
+  },
   "refund.processed": {
     name: "refund.processed",
+    shortcuts: onRefund,
     description: "A refund was processed and sent to the customer",
     template: (ctx) => ({ event: "refund.processed", data: refund(ctx, "processed") }),
   },
   "refund.failed": {
     name: "refund.failed",
+    shortcuts: onRefund,
     description: "A refund could not be processed",
     template: (ctx) => ({ event: "refund.failed", data: refund(ctx, "failed") }),
   },
   "customeridentification.success": {
     name: "customeridentification.success",
+    shortcuts: onIdentification,
     description: "A customer's identity was validated",
     template: (ctx) => ({
       event: "customeridentification.success",
@@ -346,6 +407,7 @@ const events: Record<string, EventDefinition> = {
   },
   "customeridentification.failed": {
     name: "customeridentification.failed",
+    shortcuts: onIdentification,
     description: "A customer's identity could not be validated",
     template: (ctx) => ({
       event: "customeridentification.failed",
@@ -366,6 +428,7 @@ const events: Record<string, EventDefinition> = {
   },
   "dedicatedaccount.assign.success": {
     name: "dedicatedaccount.assign.success",
+    shortcuts: onDedicatedAccount,
     description: "A dedicated virtual account was assigned to a customer",
     template: (ctx) => ({
       event: "dedicatedaccount.assign.success",
@@ -397,6 +460,7 @@ const events: Record<string, EventDefinition> = {
   },
   "dedicatedaccount.assign.failed": {
     name: "dedicatedaccount.assign.failed",
+    shortcuts: onDedicatedAccount,
     description: "A dedicated virtual account could not be assigned",
     template: (ctx) => ({
       event: "dedicatedaccount.assign.failed",
@@ -409,6 +473,7 @@ const events: Record<string, EventDefinition> = {
   },
   "paymentrequest.pending": {
     name: "paymentrequest.pending",
+    shortcuts: onPaymentRequest,
     description: "A payment request (invoice) was sent to a customer",
     template: (ctx) => ({
       event: "paymentrequest.pending",
@@ -438,6 +503,7 @@ const events: Record<string, EventDefinition> = {
   },
   "paymentrequest.success": {
     name: "paymentrequest.success",
+    shortcuts: onPaymentRequest,
     description: "A payment request (invoice) was paid",
     template: (ctx) => ({
       event: "paymentrequest.success",
@@ -467,6 +533,68 @@ const events: Record<string, EventDefinition> = {
   },
 };
 
+/** What a refund notice takes from the charge it refunds, and from any earlier refund notice. */
+function refundOf(first: Record<string, unknown>, previous: Record<string, unknown>[]) {
+  const earlier = previous.find((payload) => String(payload.event).startsWith("refund."));
+  return {
+    "data.transaction_reference": getPath(first, "data.reference"),
+    "data.amount": getPath(first, "data.amount"),
+    "data.currency": getPath(first, "data.currency"),
+    "data.customer.first_name": getPath(first, "data.customer.first_name"),
+    "data.customer.last_name": getPath(first, "data.customer.last_name"),
+    "data.customer.email": getPath(first, "data.customer.email"),
+    // Every notice about one refund carries the same refund reference.
+    ...(earlier ? { "data.refund_reference": getPath(earlier, "data.refund_reference") } : {}),
+  };
+}
+
+const scenarios: Record<string, ScenarioDefinition> = {
+  payment: {
+    name: "payment",
+    description: "A customer pays",
+    steps: [{ event: "charge.success" }],
+  },
+  refund: {
+    name: "refund",
+    description: "A customer pays, then the payment is refunded in full",
+    steps: [
+      { event: "charge.success" },
+      { event: "refund.pending", link: refundOf },
+      { event: "refund.processing", link: refundOf },
+      { event: "refund.processed", link: refundOf },
+    ],
+  },
+  "refund-failed": {
+    name: "refund-failed",
+    description: "A customer pays, then a refund is tried and fails",
+    steps: [
+      { event: "charge.success" },
+      { event: "refund.pending", link: refundOf },
+      { event: "refund.failed", link: refundOf },
+    ],
+  },
+  dispute: {
+    name: "dispute",
+    description: "A customer pays, then their bank disputes the payment",
+    steps: [
+      { event: "charge.success" },
+      {
+        event: "charge.dispute.create",
+        link: (first) => ({
+          "data.transaction.id": getPath(first, "data.id"),
+          "data.transaction.reference": getPath(first, "data.reference"),
+          "data.transaction.amount": getPath(first, "data.amount"),
+          "data.transaction.currency": getPath(first, "data.currency"),
+          "data.transaction.paid_at": getPath(first, "data.paid_at"),
+          "data.refund_amount": getPath(first, "data.amount"),
+          "data.currency": getPath(first, "data.currency"),
+          "data.customer": getPath(first, "data.customer"),
+        }),
+      },
+    ],
+  },
+};
+
 /** HMAC-SHA512 of the raw body, hex encoded, keyed with your secret key. */
 export function paystackSignature(body: string, secret: string): string {
   return createHmac("sha512", secret).update(body).digest("hex");
@@ -486,7 +614,10 @@ export const paystack: Provider = {
     reference: "data.reference",
     currency: "data.currency",
   },
+  amountUnit: "kobo, the smallest unit",
+  signsBody: true,
   events,
+  scenarios,
   sign(body, secret) {
     return { "x-paystack-signature": paystackSignature(body, secret) };
   },
@@ -501,9 +632,12 @@ export const paystack: Provider = {
   },
   summarize(payload) {
     const rows: Array<[string, string]> = [];
-    const amount = getPath(payload, "data.amount");
+    const amount = getPath(payload, "data.amount") ?? getPath(payload, "data.transaction.amount");
     const currency = getPath(payload, "data.currency");
-    const reference = getPath(payload, "data.reference");
+    const reference =
+      getPath(payload, "data.reference") ??
+      getPath(payload, "data.transaction_reference") ??
+      getPath(payload, "data.transaction.reference");
     const email = getPath(payload, "data.customer.email");
     const status = getPath(payload, "data.status");
     if (reference !== undefined) rows.push(["reference", String(reference)]);

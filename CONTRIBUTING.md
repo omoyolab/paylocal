@@ -68,10 +68,12 @@ Prettier and ESLint are configured, so formatting is not a review topic. Beyond 
 ## Releasing (maintainers)
 
 1. Update `CHANGELOG.md`: move **Unreleased** into a new version heading with today's date.
-2. `pnpm version <patch|minor|major>` to bump `package.json` and create the tag.
-3. `git push --follow-tags`.
-4. The release workflow runs `pnpm check`, publishes to npm with provenance, and creates
-   the GitHub release from the tag.
+2. Set the new version in `package.json`, commit and push to `main`.
+3. Run the release: Actions, then Release, then Run workflow. Or `gh workflow run release.yml`.
+4. The workflow runs `pnpm check`, creates the tag from `main`, publishes to npm with
+   provenance, and creates the GitHub release.
+
+Pushing a `v*` tag by hand does the same thing from step 4.
 
 Publishing uses npm Trusted Publishing, so there is no token to rotate. The package's
 trusted publisher on npmjs.com is this repository's `release.yml` workflow. If that ever

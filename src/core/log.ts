@@ -91,13 +91,27 @@ function isLogEntry(value: unknown): value is LogEntry {
 }
 
 /**
- * Resolves a replay source. Accepts a log id, a path to a log file, or a path to
- * a raw webhook payload saved from a real delivery.
+ * Resolves a replay source. Accepts `last` for the newest delivery in the log, a log id,
+ * a path to a log file, or a path to a raw webhook payload saved from a real delivery.
  */
 export async function readReplaySource(
   source: string,
   cwd = process.cwd(),
 ): Promise<{ provider?: ProviderId; payload: Record<string, unknown>; origin: string }> {
+  if (source === "last") {
+    const [latest] = await listDeliveries(cwd, 1);
+    if (!latest) {
+      throw new PaylocalError(
+        "Nothing to replay yet",
+        'Send something first with "paylocal trigger", then "paylocal replay last" sends it again',
+      );
+    }
+    return {
+      provider: latest.provider,
+      payload: latest.payload,
+      origin: join(logDir(cwd), `${latest.id}.json`),
+    };
+  }
   const candidates = [
     join(logDir(cwd), `${source}.json`),
     join(logDir(cwd), source),

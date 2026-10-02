@@ -1,6 +1,6 @@
 {
   "name": "@omoyolab/paylocal",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Local webhook tooling for Paystack and Flutterwave. Trigger, replay and verify signed webhook events against your dev server without a tunnel or a real transaction.",
   "keywords": [
     "paystack",

@@ -4,9 +4,15 @@ name: Release
 # One-time setup on npmjs.com: package Settings → Trusted publisher → GitHub Actions,
 # organization "omoyolab", repository "paylocal", workflow "release.yml".
 
+# Two ways to release the version in package.json:
+#   1. Push a tag:  git tag v1.2.3 && git push origin v1.2.3
+#   2. One click:   Actions → Release → Run workflow (or `gh workflow run release.yml`).
+#      This creates and pushes the tag from main, then publishes the same way.
+
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -27,12 +33,34 @@ jobs:
         run: npm install -g npm@latest && npm -v
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
-      - name: Check tag matches package.json
+      - name: Work out the tag
+        id: tag
         run: |
           PKG="v$(node -p "require('./package.json').version")"
-          if [ "$PKG" != "$GITHUB_REF_NAME" ]; then
-            echo "Tag $GITHUB_REF_NAME does not match package.json version $PKG" >&2
-            exit 1
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            if [ "$GITHUB_REF_NAME" != "main" ]; then
+              echo "Run this from main, not $GITHUB_REF_NAME" >&2
+              exit 1
+            fi
+            echo "tag=$PKG" >> "$GITHUB_OUTPUT"
+          else
+            if [ "$PKG" != "$GITHUB_REF_NAME" ]; then
+              echo "Tag $GITHUB_REF_NAME does not match package.json version $PKG" >&2
+              exit 1
+            fi
+            echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Create the tag (one-click release)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          if git ls-remote --tags origin "refs/tags/$TAG" | grep -q "$TAG"; then
+            echo "$TAG already exists; publishing that version if npm does not have it"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG" -m "$TAG"
+            git push origin "$TAG"
           fi
       - name: Skip publish if this version is already on npm
         id: published
@@ -49,6 +77,12 @@ jobs:
         if: steps.published.outputs.skip == 'false'
         run: npm publish --provenance --access public
       - name: Create GitHub release
-        run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists"
+          else
+            gh release create "$TAG" --title "$TAG" --generate-notes
+          fi
         env:
           GH_TOKEN: ${{ github.token }}

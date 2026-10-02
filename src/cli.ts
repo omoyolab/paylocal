@@ -3,6 +3,7 @@ import { parseArgs } from "node:util";
 
 import { buildEvent, fromPayload, signEvent } from "./core/build.js";
 import { listDeliveries, readReplaySource, recordDelivery } from "./core/log.js";
+import { buildScenario, listScenarios } from "./core/scenario.js";
 import { deliver } from "./core/send.js";
 import { verifyEndpoint } from "./core/verify.js";
 import { PaylocalError } from "./errors.js";
@@ -16,9 +17,11 @@ const HELP = `paylocal ${version} - local webhook tooling for Paystack and Flutt
 
 Usage
   paylocal trigger <provider> <event> --to <url> [options]
-  paylocal replay <id|file> --to <url> [options]
+  paylocal scenario <provider> <name> --to <url> [options]
+  paylocal replay <last|id|file> --to <url> [options]
   paylocal verify <provider> --to <url> [options]
   paylocal events [provider]
+  paylocal scenarios [provider]
   paylocal log [--limit <n>]
 
 Providers
@@ -29,10 +32,15 @@ Options
   --secret <value>        Signing secret (or PAYSTACK_SECRET_KEY / FLUTTERWAVE_SECRET_HASH)
   --set <path=value>      Override any payload field, repeatable
                           e.g. --set data.amount=250000 --set data.customer.email=ada@example.com
-  --amount <n>            Shortcut for the amount field (smallest unit, e.g. kobo)
+                          In a scenario it applies to the first notice, and the rest follow it
+  --amount <n>            Shortcut for the amount field, in the provider's own unit:
+                          kobo for Paystack, naira for Flutterwave
   --email <address>       Shortcut for the customer email field
-  --reference <ref>       Shortcut for the transaction reference field
+  --reference <ref>       Shortcut for the transaction reference field, wherever the
+                          event keeps it
   --currency <code>       Shortcut for the currency field
+  --reverse               scenario: send the notices last to first
+  --twice                 scenario: send every notice two times
   --event <name>          Event used by verify (defaults per provider)
   --provider <id>         Provider for replay when it cannot be inferred
   --dry-run               Print the signed request instead of sending it
@@ -47,7 +55,8 @@ Examples
   paylocal trigger paystack charge.success --to http://localhost:3000/webhooks/paystack
   paylocal trigger flutterwave charge.completed --to http://localhost:3000/hooks --amount 12000
   paylocal verify paystack --to http://localhost:3000/webhooks/paystack
-  paylocal replay 20260929-213012-345-paystack-charge.success --to http://localhost:3000/webhooks/paystack
+  paylocal scenario paystack refund --to http://localhost:3000/webhooks/paystack --reference ORD-1042
+  paylocal replay last --to http://localhost:3000/webhooks/paystack
 
 Exit codes
   0  success            1  delivery rejected or endpoint not verified            2  usage error
@@ -76,6 +85,8 @@ function parse(argv: string[]) {
       currency: { type: "string" },
       event: { type: "string" },
       provider: { type: "string" },
+      reverse: { type: "boolean" },
+      twice: { type: "boolean" },
       "dry-run": { type: "boolean" },
       "no-log": { type: "boolean" },
       timeout: { type: "string" },
@@ -160,13 +171,26 @@ function printResult(result: SendResult, io: Io): void {
   }
 }
 
-async function send(signed: SignedEvent, values: Values, io: Io): Promise<number> {
+/**
+ * Sends one signed event and reports on it. When `collect` is given, the JSON report
+ * is added to it instead of printed, so a scenario can print one array at the end.
+ */
+async function send(
+  signed: SignedEvent,
+  values: Values,
+  io: Io,
+  collect?: unknown[],
+): Promise<number> {
   const url = requireUrl(values, io);
   const timeoutMs = parseNumber(values.timeout, "timeout", 10_000);
+  const json = (report: unknown) => {
+    if (collect) collect.push(report);
+    else io.out(JSON.stringify(report, null, 2));
+  };
 
   if (values["dry-run"]) {
     if (values.json) {
-      io.out(JSON.stringify({ url, headers: signed.headers, payload: signed.payload }, null, 2));
+      json({ url, headers: signed.headers, payload: signed.payload });
     } else {
       printRequest(signed, url, io);
       io.out("");
@@ -183,13 +207,7 @@ async function send(signed: SignedEvent, values: Values, io: Io): Promise<number
   }
 
   if (values.json) {
-    io.out(
-      JSON.stringify(
-        { ...result, provider: signed.provider, event: signed.event, logId: entry?.id ?? null },
-        null,
-        2,
-      ),
-    );
+    json({ ...result, provider: signed.provider, event: signed.event, logId: entry?.id ?? null });
   } else {
     printRequest(signed, url, io);
     printResult(result, io);
@@ -212,11 +230,36 @@ async function commandTrigger(positionals: string[], values: Values, io: Io): Pr
   return send(signed, values, io);
 }
 
+async function commandScenario(positionals: string[], values: Values, io: Io): Promise<number> {
+  const [providerId, name] = positionals;
+  if (!providerId || !name) {
+    throw new PaylocalError(
+      "scenario needs a provider and a scenario name",
+      "Example: paylocal scenario paystack refund --to http://localhost:3000/webhooks",
+    );
+  }
+  const provider = getProvider(providerId);
+  const secret = requireSecret(provider, values, io);
+  let events = buildScenario(provider.id, name, buildOptions(values));
+  if (values.reverse) events = [...events].reverse();
+  if (values.twice) events = events.flatMap((event) => [event, event]);
+
+  const reports: unknown[] = [];
+  let code = 0;
+  for (const [index, built] of events.entries()) {
+    if (index > 0 && !values.json) io.out("");
+    const outcome = await send(signEvent(built, secret), values, io, reports);
+    if (outcome !== 0) code = outcome;
+  }
+  if (values.json) io.out(JSON.stringify(reports, null, 2));
+  return code;
+}
+
 async function commandReplay(positionals: string[], values: Values, io: Io): Promise<number> {
   const [source] = positionals;
   if (!source) {
     throw new PaylocalError(
-      "replay needs a log id or a path to a JSON payload",
+      'replay needs "last", a log id or a path to a JSON payload',
       'Run "paylocal log" to see ids',
     );
   }
@@ -251,11 +294,17 @@ function printVerify(result: VerifyResult, io: Io): void {
         "valid event",
         `${result.valid.ok ? paint.green("accepted") : paint.red("rejected")} ${paint.dim(`HTTP ${result.valid.status}, ${result.valid.durationMs}ms`)}`,
       ],
-      [
-        "tampered event",
-        `${result.tampered.ok ? paint.red("accepted") : paint.green("rejected")} ${paint.dim(`HTTP ${result.tampered.status}, ${result.tampered.durationMs}ms`)}`,
-      ],
-      ["tamper", result.tamperDescription],
+      ...result.probes.map((probe): [string, string] => {
+        const word = {
+          rejected: paint.green("rejected"),
+          accepted: paint.red("accepted"),
+          crashed: paint.red("crashed "),
+        }[probe.outcome];
+        return [
+          probe.name.replace(/-/g, " "),
+          `${word} ${paint.dim(`HTTP ${probe.result.status}, ${probe.result.durationMs}ms`)}`,
+        ];
+      }),
     ]),
   );
   io.out("");
@@ -313,6 +362,38 @@ function commandEvents(positionals: string[], values: Values, io: Io): number {
   return 0;
 }
 
+function commandScenarios(positionals: string[], values: Values, io: Io): number {
+  const entries = listScenarios(positionals[0]);
+  if (values.json) {
+    io.out(
+      JSON.stringify(
+        entries.map(({ provider, scenario }) => ({
+          provider,
+          scenario: scenario.name,
+          description: scenario.description,
+          events: scenario.steps.map((step) => step.event),
+        })),
+        null,
+        2,
+      ),
+    );
+    return 0;
+  }
+  let current: string | undefined;
+  for (const { provider, scenario } of entries) {
+    if (provider !== current) {
+      if (current) io.out("");
+      io.out(io.paint.bold(getProvider(provider).name));
+      current = provider;
+    }
+    io.out(`  ${io.paint.cyan(scenario.name.padEnd(16))} ${scenario.description}`);
+    io.out(
+      `  ${"".padEnd(16)} ${io.paint.dim(scenario.steps.map((step) => step.event).join(", "))}`,
+    );
+  }
+  return 0;
+}
+
 async function commandLog(values: Values, io: Io): Promise<number> {
   const limit = parseNumber(values.limit, "limit", 20);
   const entries = await listDeliveries(io.cwd, limit);
@@ -364,6 +445,10 @@ export async function run(argv: string[], io: Io): Promise<number> {
     switch (command) {
       case "trigger":
         return await commandTrigger(rest, values, io);
+      case "scenario":
+        return await commandScenario(rest, values, io);
+      case "scenarios":
+        return commandScenarios(rest, values, io);
       case "replay":
         return await commandReplay(rest, values, io);
       case "verify":

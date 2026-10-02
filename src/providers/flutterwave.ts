@@ -1,4 +1,4 @@
-import type { EventContext, EventDefinition, Provider } from "../types.js";
+import type { EventContext, EventDefinition, Provider, ScenarioDefinition } from "../types.js";
 import { getPath } from "../util/path.js";
 
 /*
@@ -55,6 +55,7 @@ function charge(ctx: EventContext, status: "successful" | "failed") {
 const events: Record<string, EventDefinition> = {
   "charge.completed": {
     name: "charge.completed",
+    shortcuts: { amount: ["data.amount", "data.charged_amount"] },
     description: "A charge finished, successfully or not (check data.status)",
     template: (ctx) => ({
       event: "charge.completed",
@@ -64,6 +65,7 @@ const events: Record<string, EventDefinition> = {
   },
   "transfer.completed": {
     name: "transfer.completed",
+    shortcuts: { reference: "data.reference", email: null },
     description: "A transfer finished, successfully or not (check data.status)",
     template: (ctx) => ({
       event: "transfer.completed",
@@ -92,6 +94,7 @@ const events: Record<string, EventDefinition> = {
   },
   "refund.completed": {
     name: "refund.completed",
+    shortcuts: { amount: "data.amount_refunded", currency: null },
     description: "A refund finished processing",
     template: (ctx) => ({
       event: "refund.completed",
@@ -114,6 +117,7 @@ const events: Record<string, EventDefinition> = {
   },
   "subscription.cancelled": {
     name: "subscription.cancelled",
+    shortcuts: { reference: null, currency: null },
     description: "A payment plan subscription was cancelled",
     template: (ctx) => ({
       event: "subscription.cancelled",
@@ -127,6 +131,42 @@ const events: Record<string, EventDefinition> = {
         created_at: iso(ctx.now),
       },
     }),
+  },
+};
+
+const scenarios: Record<string, ScenarioDefinition> = {
+  payment: {
+    name: "payment",
+    description: "A customer pays",
+    steps: [{ event: "charge.completed" }],
+  },
+  "failed-payment": {
+    name: "failed-payment",
+    description: "A customer's payment fails",
+    steps: [
+      {
+        event: "charge.completed",
+        set: { "data.status": "failed", "data.processor_response": "Insufficient Funds" },
+      },
+    ],
+  },
+  refund: {
+    name: "refund",
+    description: "A customer pays, then the payment is refunded in full",
+    steps: [
+      { event: "charge.completed" },
+      {
+        event: "refund.completed",
+        link: (first) => ({
+          "data.tx_id": getPath(first, "data.id"),
+          "data.tx_ref": getPath(first, "data.tx_ref"),
+          "data.flw_ref": getPath(first, "data.flw_ref"),
+          "data.amount_refunded": getPath(first, "data.amount"),
+          "data.account_id": getPath(first, "data.account_id"),
+          "data.customer": getPath(first, "data.customer"),
+        }),
+      },
+    ],
   },
 };
 
@@ -144,7 +184,10 @@ export const flutterwave: Provider = {
     reference: "data.tx_ref",
     currency: "data.currency",
   },
+  amountUnit: "naira, the major unit",
+  signsBody: false,
   events,
+  scenarios,
   sign(_body, secret) {
     return { "verif-hash": secret };
   },
@@ -158,7 +201,7 @@ export const flutterwave: Provider = {
   summarize(payload) {
     const rows: Array<[string, string]> = [];
     const reference = getPath(payload, "data.tx_ref") ?? getPath(payload, "data.reference");
-    const amount = getPath(payload, "data.amount");
+    const amount = getPath(payload, "data.amount") ?? getPath(payload, "data.amount_refunded");
     const currency = getPath(payload, "data.currency");
     const email = getPath(payload, "data.customer.email");
     const status = getPath(payload, "data.status");

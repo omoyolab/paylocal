@@ -1,8 +1,18 @@
 import { PaylocalError } from "../errors.js";
 import { getEvent, getProvider } from "../providers/index.js";
-import type { BuiltEvent, SignedEvent } from "../types.js";
+import type {
+  BuiltEvent,
+  EventDefinition,
+  Provider,
+  SendOptions,
+  SendResult,
+  ShortcutName,
+  ShortcutTarget,
+  SignedEvent,
+} from "../types.js";
 import { setPath } from "../util/path.js";
 import { createContext } from "../util/random.js";
+import { deliver } from "./send.js";
 
 export interface BuildOptions {
   /** Field overrides keyed by dotted path, e.g. `{ "data.amount": 250000 }`. */
@@ -29,7 +39,7 @@ export function buildEvent(
   const definition = getEvent(providerId, eventName);
   const payload = definition.template(createContext(options.now));
 
-  const shortcuts: Array<[keyof BuildOptions, unknown]> = [
+  const shortcuts: Array<[ShortcutName, unknown]> = [
     ["amount", options.amount],
     ["email", options.email],
     ["reference", options.reference],
@@ -37,14 +47,14 @@ export function buildEvent(
   ];
   for (const [name, value] of shortcuts) {
     if (value === undefined) continue;
-    const path = provider.shortcuts[name];
-    if (!path) {
+    const target = shortcutTarget(provider, definition, name);
+    if (target === null) {
       throw new PaylocalError(
-        `${provider.name} has no "${name}" shortcut`,
-        "Use --set path=value instead",
+        `${provider.name} ${definition.name} has no ${name} field`,
+        `Leave out the ${name} shortcut, or set a field of your own with --set path=value`,
       );
     }
-    setPath(payload, path, value);
+    for (const path of Array.isArray(target) ? target : [target]) setPath(payload, path, value);
   }
 
   for (const [path, value] of Object.entries(options.set ?? {})) {
@@ -57,6 +67,16 @@ export function buildEvent(
     payload,
     body: JSON.stringify(payload),
   };
+}
+
+/** Where a shortcut lands for one event: the event's own answer if it has one, else the provider's. */
+export function shortcutTarget(
+  provider: Provider,
+  definition: EventDefinition,
+  name: ShortcutName,
+): ShortcutTarget {
+  const own = definition.shortcuts?.[name];
+  return own !== undefined ? own : provider.shortcuts[name];
 }
 
 /** Attaches the headers the provider would send for this exact body. */
@@ -75,13 +95,27 @@ export function fromPayload(providerId: string, payload: Record<string, unknown>
   return { provider: provider.id, event, payload, body: JSON.stringify(payload) };
 }
 
+export interface FixtureRequest {
+  body: string;
+  headers: Record<string, string>;
+}
+
 export interface WebhookFixture {
   provider: string;
   event: string;
   payload: Record<string, unknown>;
   body: string;
   /** Returns the body and headers ready to hand to supertest, fetch or any HTTP client. */
-  sign: (secret: string) => { body: string; headers: Record<string, string> };
+  sign: (secret: string) => FixtureRequest;
+  /**
+   * A request your endpoint must refuse: signed correctly, then altered. For a provider
+   * that signs the body the body is changed; otherwise the signature header is.
+   */
+  tamper: (secret: string) => FixtureRequest & { description: string };
+  /** The body with no signature header at all. Your endpoint must refuse this too. */
+  unsigned: () => FixtureRequest;
+  /** Signs the notice and POSTs it to `url`, the way the provider would. */
+  send: (url: string, secret: string, options?: SendOptions) => Promise<SendResult>;
 }
 
 /**
@@ -96,7 +130,14 @@ export function webhook(
   eventName: string,
   options: BuildOptions = {},
 ): WebhookFixture {
-  const built = buildEvent(providerId, eventName, options);
+  return fixture(buildEvent(providerId, eventName, options));
+}
+
+const JSON_TYPE = { "content-type": "application/json" };
+
+/** Wraps a built event in the helpers a test suite uses. */
+export function fixture(built: BuiltEvent): WebhookFixture {
+  const provider = getProvider(built.provider);
   return {
     provider: built.provider,
     event: built.event,
@@ -104,10 +145,23 @@ export function webhook(
     body: built.body,
     sign(secret) {
       const signed = signEvent(built, secret);
+      return { body: signed.body, headers: { ...JSON_TYPE, ...signed.headers } };
+    },
+    tamper(secret) {
+      const signed = signEvent(built, secret);
+      const tampered = provider.tamper(signed.body, signed.headers);
       return {
-        body: signed.body,
-        headers: { "content-type": "application/json", ...signed.headers },
+        body: tampered.body,
+        headers: { ...JSON_TYPE, ...tampered.headers },
+        description: tampered.description,
       };
+    },
+    unsigned() {
+      return { body: built.body, headers: { ...JSON_TYPE } };
+    },
+    send(url, secret, sendOptions) {
+      const signed = signEvent(built, secret);
+      return deliver({ body: signed.body, headers: signed.headers }, url, sendOptions);
     },
   };
 }

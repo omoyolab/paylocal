@@ -14,12 +14,50 @@ export interface EventContext {
 
 export type EventTemplate = (ctx: EventContext) => Record<string, unknown>;
 
+/** The fields `--amount`, `--email`, `--reference` and `--currency` can set. */
+export type ShortcutName = "amount" | "email" | "reference" | "currency";
+
+/**
+ * Where a shortcut lands in a payload. One path, several paths that always hold the
+ * same value, or `null` when the event has no such field.
+ */
+export type ShortcutTarget = string | string[] | null;
+
 export interface EventDefinition {
   /** Event name exactly as the provider sends it, e.g. `charge.success`. */
   name: string;
   /** One-line description shown by `paylocal events`. */
   description: string;
   template: EventTemplate;
+  /**
+   * Where the shortcuts land for this event, when it differs from the provider's
+   * defaults. A refund keeps its transaction reference in a different field from a
+   * charge, for example.
+   */
+  shortcuts?: Partial<Record<ShortcutName, ShortcutTarget>>;
+}
+
+/** One notice in a scenario, and how it takes its values from the notices before it. */
+export interface ScenarioStep {
+  event: string;
+  /** Fixed field overrides for this notice, such as a failed status. */
+  set?: Record<string, unknown>;
+  /**
+   * Field overrides for this notice, worked out from the payloads already built.
+   * `first` is the first notice in the scenario, `previous` is every earlier one.
+   */
+  link?: (
+    first: Record<string, unknown>,
+    previous: Record<string, unknown>[],
+  ) => Record<string, unknown>;
+}
+
+/** A named run of related notices about one transaction. */
+export interface ScenarioDefinition {
+  name: string;
+  /** One-line description shown by `paylocal scenarios`. */
+  description: string;
+  steps: ScenarioStep[];
 }
 
 export interface Provider {
@@ -36,9 +74,14 @@ export interface Provider {
   docs: string;
   /** Event used by `paylocal verify` when none is given. */
   verifyEvent: string;
-  /** Maps CLI shortcuts (`--amount`) to payload paths (`data.amount`). */
-  shortcuts: Record<string, string>;
+  /** Maps CLI shortcuts (`--amount`) to payload paths (`data.amount`). An event can override these. */
+  shortcuts: Record<ShortcutName, ShortcutTarget>;
+  /** What unit `--amount` is in for this provider, for help text and output. */
+  amountUnit: string;
+  /** True when the signature covers the body, so a changed body must be refused. */
+  signsBody: boolean;
   events: Record<string, EventDefinition>;
+  scenarios: Record<string, ScenarioDefinition>;
   /** Produces the headers a real delivery from this provider would carry. */
   sign: (body: string, secret: string) => Record<string, string>;
   /** Produces a request that must fail signature verification. */
@@ -83,12 +126,29 @@ export interface SendResult {
 
 export type Verdict = "verified" | "not-verified" | "inconclusive";
 
+/** What the endpoint did with a request it should have refused. */
+export type ProbeOutcome = "rejected" | "accepted" | "crashed";
+
+export interface VerifyProbe {
+  /** `no-signature`, `wrong-secret` or `changed-body`. */
+  name: string;
+  /** What was wrong with the request, in words. */
+  description: string;
+  result: SendResult;
+  /** `rejected` is a 3xx or 4xx, `accepted` a 2xx, `crashed` a 5xx. */
+  outcome: ProbeOutcome;
+}
+
 export interface VerifyResult {
   provider: ProviderId;
   event: string;
   url: string;
   valid: SendResult;
+  /** Every request the endpoint should have refused, in the order they were sent. */
+  probes: VerifyProbe[];
+  /** The last probe's response. Kept for code written against 0.1. */
   tampered: SendResult;
+  /** The last probe's description. Kept for code written against 0.1. */
   tamperDescription: string;
   verdict: Verdict;
   notes: string[];
