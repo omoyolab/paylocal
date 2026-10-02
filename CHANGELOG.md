@@ -6,6 +6,10 @@ uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Repeatable `--header "Name: value"` for custom headers on trigger, scenario, replay and verify (#6).
+
 ## [0.2.0] - 2026-10-01
 
 Everything here came from building a real application on 0.1.0: the
