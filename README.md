@@ -198,12 +198,20 @@ if you like.
 
 List the events you can trigger, the scenarios you can run, and the deliveries you have sent.
 
+### Custom request headers
+
+Pass repeatable `--header "Name: value"` flags to trigger, scenario, replay or verify.
+For example, `paylocal trigger paystack charge.success --to http://localhost:3000/hooks --header "X-Tenant: dev"`.
+Headers also appear in dry-run output. Header names are case-insensitive; the last value wins.
+Provider signature headers are always controlled by paylocal, including verification probes.
+
 ### Options
 
 | Option                                             | Meaning                                                                              |
 | -------------------------------------------------- | ------------------------------------------------------------------------------------ |
 | `--to <url>`                                       | Endpoint that receives the webhook. Falls back to `PAYLOCAL_URL`.                    |
 | `--secret <value>`                                 | Signing secret. Falls back to `PAYSTACK_SECRET_KEY` or `FLUTTERWAVE_SECRET_HASH`.    |
+| `--header <Name: value>`                           | Add a request header. Repeatable.                                                    |
 | `--set <path=value>`                               | Override a payload field. Repeatable.                                                |
 | `--amount`, `--email`, `--reference`, `--currency` | Shortcuts for common fields. The amount is kobo for Paystack, naira for Flutterwave. |
 | `--reverse`, `--twice`                             | For `scenario`: send the notices last to first, or each one two times.               |

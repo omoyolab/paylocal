@@ -148,6 +148,96 @@ describe("paylocal cli", () => {
     );
   });
 
+  it("forwards repeatable headers through trigger, replay and every verify probe", async () => {
+    server = await startServer((req) =>
+      req.headers["x-paystack-signature"] === paystackSignature(req.body, "sk_test_headers")
+        ? { status: 200 }
+        : { status: 401 },
+    );
+    const headers = [
+      "--header",
+      "Authorization: Bearer test:token",
+      "--header",
+      "X-Tenant: dev",
+      "--header",
+      "X-Paystack-Signature: ignored",
+    ];
+    const trigger = await paylocal(
+      [
+        "trigger",
+        "paystack",
+        "charge.success",
+        "--to",
+        server.url,
+        "--secret",
+        "sk_test_headers",
+        "--json",
+        ...headers,
+      ],
+      { cwd },
+    );
+    expect(trigger.code).toBe(0);
+    const { logId } = JSON.parse(trigger.stdout) as { logId: string };
+    const replay = await paylocal(
+      ["replay", logId, "--to", server.url, "--secret", "sk_test_headers", ...headers],
+      { cwd },
+    );
+    expect(replay.code).toBe(0);
+    const verify = await paylocal(
+      [
+        "verify",
+        "paystack",
+        "--to",
+        server.url,
+        "--secret",
+        "sk_test_headers",
+        "--json",
+        ...headers,
+      ],
+      { cwd },
+    );
+    expect(verify.code).toBe(0);
+    expect(server.requests).toHaveLength(6);
+    for (const req of server.requests) {
+      expect(req.headers.authorization).toBe("Bearer test:token");
+      expect(req.headers["x-tenant"]).toBe("dev");
+    }
+    expect(server.requests[3]!.headers["x-paystack-signature"]).toBeUndefined();
+  });
+
+  it("includes custom headers in dry-run output and rejects malformed headers", async () => {
+    const args = [
+      "trigger",
+      "paystack",
+      "charge.success",
+      "--to",
+      "http://localhost:1",
+      "--secret",
+      "test",
+      "--dry-run",
+      "--json",
+    ];
+    const dry = await paylocal([
+      ...args,
+      "--header",
+      " X-Tenant : first ",
+      "--header",
+      "x-tenant: last",
+    ]);
+    expect(dry.code).toBe(0);
+    expect(JSON.parse(dry.stdout).headers["x-tenant"]).toBe("last");
+    for (const header of [
+      "no-colon",
+      ": value",
+      "bad name: value",
+      "Name: value\r\nInjected: yes",
+    ]) {
+      const invalid = await paylocal([...args, "--header", header]);
+      expect(invalid.code).toBe(2);
+      expect(invalid.stderr).toContain("Name: value");
+    }
+  });
+
   it("triggers, logs, lists and replays an event end to end", async () => {
     server = await startServer((req) =>
       req.headers["x-paystack-signature"] === paystackSignature(req.body, "sk_test_e2e")
