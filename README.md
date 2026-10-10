@@ -326,6 +326,10 @@ Vote on these or propose others in [Discussions](https://github.com/omoyolab/pay
 Bug reports, payload corrections, new events and new providers are all welcome.
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the setup and the checklist.
 
+## How it is made
+
+Built with AI assistance (Claude). Every change is reviewed and decided by the maintainer before it ships.
+
 ## License
 
 [MIT](LICENSE). paylocal is not affiliated with or endorsed by Paystack or Flutterwave.
