@@ -7,6 +7,11 @@ updates:
     groups:
       dev-dependencies:
         dependency-type: development
+        # Minor and patch only. A major bump folded into a grouped PR looks
+        # routine and is not: TypeScript 7 arrived this way and broke the lint,
+        # because typescript-eslint does not support it yet. Majors now come as
+        # their own pull request, where the version jump is visible.
+        update-types: ["minor", "patch"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
